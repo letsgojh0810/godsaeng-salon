@@ -60,6 +60,16 @@ def init_db():
                 created_at  TEXT    DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS goals (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     TEXT    NOT NULL,
+                room_id     TEXT    NOT NULL,
+                date        TEXT    NOT NULL,
+                goal        TEXT    NOT NULL,
+                created_at  TEXT    DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         conn.commit()
 
 
@@ -84,6 +94,50 @@ def _fetch_scores(room_id: str, date: str) -> list:
     return [dict(r) for r in rows]
 
 
+def _fetch_goals(user_id: str, date: str) -> list:
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT goal FROM goals WHERE user_id = ? AND date = ? ORDER BY id",
+            (user_id, date),
+        ).fetchall()
+    return [r["goal"] for r in rows]
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="Set Daily Goal",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=False,
+    )
+)
+def set_goal(user_id: str, goal: str, room_id: str = "default") -> str:
+    """Sets a daily productivity goal for a user in GodSaeng Salon(갓생살롱). Stores the goal and returns an encouraging message to motivate the user.
+
+    Args:
+        user_id: User ID (e.g., minjun)
+        goal:    Goal description (e.g., 헬스 1시간, 독서 30분, 카공 2시간)
+        room_id: Room ID, defaults to "default"
+    """
+    date = datetime.now().strftime("%Y-%m-%d")
+
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO goals (user_id, room_id, date, goal) VALUES (?, ?, ?, ?)",
+            (user_id, room_id, date, goal),
+        )
+        conn.commit()
+
+    return (
+        f"## 목표 설정 완료!\n\n"
+        f"- **유저**: {user_id}\n"
+        f"- **오늘의 목표**: {goal}\n"
+        f"- **날짜**: {date}\n\n"
+        f"기억해뒀어. 나중에 인증샷 보내줘! 믿고 있을게 💪"
+    )
+
+
 @mcp.tool(
     annotations=ToolAnnotations(
         title="Analyze Lifestyle Photo",
@@ -94,12 +148,12 @@ def _fetch_scores(room_id: str, date: str) -> list:
     )
 )
 def analyze_photo(image_url: str, user_id: str, room_id: str) -> str:
-    """Analyzes a daily lifestyle photo using GodSaeng Salon(갓생살롱) and measures the GodSaeng(갓생) productivity index and Dopamine(도파민) index. Stores the score in the database and returns a formatted result.
+    """Analyzes a daily lifestyle photo using GodSaeng Salon(갓생살롱) and measures the GodSaeng(갓생) productivity index and Dopamine(도파민) index. Checks against the user's set goal and stores the score in the database.
 
     Args:
         image_url: URL of the photo to analyze
         user_id:   User ID who uploaded the photo (e.g., minjun)
-        room_id:   Group chat room ID (e.g., room_abc123)
+        room_id:   Room ID (e.g., room_abc123)
     """
     try:
         resp = httpx.get(image_url, follow_redirects=True, timeout=30)
@@ -107,6 +161,10 @@ def analyze_photo(image_url: str, user_id: str, room_id: str) -> str:
 
         media_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
         image_bytes = resp.content
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        goals = _fetch_goals(user_id, today)
+        goal_context = f"\n참고로 이 유저의 오늘 목표는 '{', '.join(goals)}'입니다. 목표와 관련된 활동이면 갓생 점수를 더 높게 주세요." if goals else ""
 
         client = get_client()
         response = client.models.generate_content(
@@ -122,12 +180,12 @@ def analyze_photo(image_url: str, user_id: str, room_id: str) -> str:
                     '  "dopamine": 0~30 사이 정수,\n'
                     '  "comment": "20자 이내 찰진 한 줄 평"\n'
                     "}"
+                    + goal_context
                 )),
             ],
         )
 
         result = extract_json(response.text)
-        today = datetime.now().strftime("%Y-%m-%d")
 
         with get_db() as conn:
             conn.execute(
@@ -139,9 +197,11 @@ def analyze_photo(image_url: str, user_id: str, room_id: str) -> str:
             )
             conn.commit()
 
+        goal_msg = f"\n- **오늘 목표**: {', '.join(goals)}" if goals else ""
+
         return (
             f"## 분석 완료 — {user_id}\n\n"
-            f"- **활동**: {result['activity']}\n"
+            f"- **활동**: {result['activity']}{goal_msg}\n"
             f"- **갓생 지수**: {result['godsaeng']}점\n"
             f"- **도파민 지수**: {result['dopamine']}점\n"
             f"- **한 줄 평**: {result['comment']}"
@@ -163,7 +223,7 @@ def query_scores(room_id: str, date: str = "") -> str:
     """Retrieves the daily GodSaeng(갓생) and Dopamine(도파민) score leaderboard for all users in a room from GodSaeng Salon(갓생살롱). Returns a ranked list with MVP and laziest member highlighted.
 
     Args:
-        room_id: Group chat room ID
+        room_id: Room ID
         date:    Date to query in YYYY-MM-DD format. Defaults to today if empty.
     """
     if not date:
@@ -197,10 +257,10 @@ def query_scores(room_id: str, date: str = "") -> str:
     )
 )
 def generate_briefing(room_id: str, date: str = "") -> str:
-    """Generates a witty daily award briefing using GodSaeng Salon(갓생살롱) based on the day's score data. Awards the MVP for highest GodSaeng(갓생) score and the laziest member for highest Dopamine(도파민) score with humorous commentary.
+    """Generates a witty daily award briefing using GodSaeng Salon(갓생살롱) based on the day's score and goal data. Awards MVP and laziest member with humorous commentary.
 
     Args:
-        room_id: Group chat room ID
+        room_id: Room ID
         date:    Briefing date in YYYY-MM-DD format. Defaults to today if empty.
     """
     if not date:
@@ -214,6 +274,8 @@ def generate_briefing(room_id: str, date: str = "") -> str:
     mvp = scores[0]["user_id"]
     laziest = max(scores, key=lambda x: x["dopamine"])["user_id"]
 
+    goals_by_user = {s["user_id"]: _fetch_goals(s["user_id"], date) for s in scores}
+
     client = get_client()
     response = client.models.generate_content(
         model=MODEL,
@@ -222,11 +284,12 @@ def generate_briefing(room_id: str, date: str = "") -> str:
             f"날짜: {date}\n"
             f"MVP(갓생 1위): {mvp}\n"
             f"베짱이(도파민 1위): {laziest}\n"
-            f"점수 데이터: {json.dumps(scores, ensure_ascii=False)}\n\n"
+            f"점수 데이터: {json.dumps(scores, ensure_ascii=False)}\n"
+            f"오늘의 목표: {json.dumps(goals_by_user, ensure_ascii=False)}\n\n"
             "조건:\n"
             "- 갓생 점수 1위 → MVP 어워드\n"
             "- 도파민 점수 1위 → 베짱이 어워드\n"
-            "- 각 수상자에게 칭찬인 척 깎는 or 공감인 척 찌르는 멘트\n"
+            "- 목표를 달성한 사람은 칭찬, 못 한 사람은 공감인 척 찌르는 멘트\n"
             "- 방 전체 총평 한 줄\n"
             "- 이모지 적당히, 전체 200자 이내"
         )),
