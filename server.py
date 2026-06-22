@@ -69,6 +69,16 @@ def init_db():
                 created_at  TEXT    DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS reminders (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     TEXT    NOT NULL,
+                message     TEXT    NOT NULL,
+                remind_date TEXT    NOT NULL,
+                done        INTEGER DEFAULT 0,
+                created_at  TEXT    DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         conn.commit()
 
 
@@ -284,6 +294,106 @@ def generate_daily_plan(user_id: str) -> str:
     )
 
     return response.text
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="Set Reminder",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=False,
+    )
+)
+def set_reminder(user_id: str, message: str, remind_date: str) -> str:
+    """Saves a reminder for a user in GodSaeng Salon(갓생살롱) to be surfaced on the specified date.
+
+    Args:
+        user_id:     User ID
+        message:     Reminder content (e.g., 결혼식, 병원 예약, 헬스 등록)
+        remind_date: Date to remind in YYYY-MM-DD format (e.g., 2026-06-28)
+    """
+    try:
+        datetime.strptime(remind_date, "%Y-%m-%d")
+    except ValueError:
+        return "날짜 형식이 잘못됐어요. YYYY-MM-DD 형식으로 입력해주세요. (예: 2026-06-28)"
+
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO reminders (user_id, message, remind_date) VALUES (?, ?, ?)",
+            (user_id, message, remind_date),
+        )
+        conn.commit()
+
+    return (
+        f"## ⏰ 리마인더 설정 완료!\n\n"
+        f"- **날짜**: {remind_date}\n"
+        f"- **내용**: {message}\n\n"
+        f"해당 날짜에 대화 시작하면 알려드릴게요!"
+    )
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="Check Reminders",
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+)
+def check_reminders(user_id: str) -> str:
+    """Checks today's and upcoming reminders for a user in GodSaeng Salon(갓생살롱). Call this at the start of each conversation to surface timely alerts.
+
+    Args:
+        user_id: User ID
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT * FROM reminders
+               WHERE user_id = ? AND done = 0 AND remind_date >= ?
+               ORDER BY remind_date ASC LIMIT 10""",
+            (user_id, today),
+        ).fetchall()
+
+    if not rows:
+        return "예정된 리마인더가 없어요."
+
+    today_items = []
+    upcoming_items = []
+
+    for r in rows:
+        r = dict(r)
+        if r["remind_date"] == today:
+            today_items.append(r)
+        else:
+            upcoming_items.append(r)
+
+    lines = []
+    if today_items:
+        lines.append("## ⏰ 오늘 리마인더\n")
+        for r in today_items:
+            lines.append(f"- {r['message']}")
+        lines.append("")
+
+    if upcoming_items:
+        lines.append("## 📅 다가오는 일정\n")
+        for r in upcoming_items:
+            lines.append(f"- **{r['remind_date']}** {r['message']}")
+
+    # 오늘 것은 완료 처리
+    if today_items:
+        ids = [r["id"] for r in today_items]
+        with get_db() as conn:
+            conn.execute(
+                f"UPDATE reminders SET done = 1 WHERE id IN ({','.join('?' * len(ids))})",
+                ids,
+            )
+            conn.commit()
+
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
