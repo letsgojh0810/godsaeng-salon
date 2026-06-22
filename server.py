@@ -66,9 +66,15 @@ def init_db():
                 activity    TEXT,
                 score       INTEGER DEFAULT 0,
                 comment     TEXT,
+                verified    INTEGER DEFAULT 0,
                 created_at  TEXT    DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # migration: add verified column for existing DBs
+        try:
+            conn.execute("ALTER TABLE checkins ADD COLUMN verified INTEGER DEFAULT 0")
+        except Exception:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS reminders (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,9 +110,10 @@ def _get_goal_by_category(user_id: str, category: str):
 
 
 def _count_checkins(goal_id: int) -> int:
+    """Returns number of days with a verified check-in."""
     with get_db() as conn:
         row = conn.execute(
-            "SELECT COUNT(DISTINCT date) AS cnt FROM checkins WHERE goal_id = ?",
+            "SELECT COUNT(DISTINCT date) AS cnt FROM checkins WHERE goal_id = ? AND verified = 1",
             (goal_id,),
         ).fetchone()
     return row["cnt"] if row else 0
@@ -231,24 +238,38 @@ def check_in(image_url: str, user_id: str, category: str) -> str:
 
         result = extract_json(response.text)
 
+        # 통과 기준: 목표 일치 + 60점 이상
+        verified = 1 if result.get("goal_matched") and result.get("score", 0) >= 60 else 0
+
         with get_db() as conn:
             conn.execute(
-                "INSERT INTO checkins (user_id, goal_id, date, activity, score, comment) VALUES (?, ?, ?, ?, ?, ?)",
-                (user_id, goal["id"], today, result["activity"], result["score"], result["comment"]),
+                "INSERT INTO checkins (user_id, goal_id, date, activity, score, comment, verified) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (user_id, goal["id"], today, result["activity"], result["score"], result["comment"], verified),
             )
             conn.commit()
 
         emoji = CATEGORY_EMOJI.get(category, "✅")
-        matched_msg = f"{emoji} 목표 달성 인증 완료!" if result.get("goal_matched") else "오늘도 수고했어! 내일은 더 잘 할 수 있어 💪"
 
-        return (
-            f"## 인증 완료 — {user_id}\n\n"
-            f"- **활동**: {result['activity']}\n"
-            f"- **목표**: {goal['goal']}\n"
-            f"- **달성도**: {result['score']}점\n"
-            f"- **한 줄 평**: {result['comment']}\n\n"
-            f"{matched_msg}"
-        )
+        if verified:
+            verified_cnt = _count_checkins(goal["id"])
+            result_msg = (
+                f"## {emoji} 인증 통과! — {user_id}\n\n"
+                f"- **활동**: {result['activity']}\n"
+                f"- **점수**: {result['score']}점 ✅\n"
+                f"- **한 줄 평**: {result['comment']}\n\n"
+                f"오늘 달성 기록됐어! 누적 **{verified_cnt}일** 완료 🔥"
+            )
+        else:
+            reason = "목표와 관련 없는 사진이에요." if not result.get("goal_matched") else f"점수가 {result['score']}점으로 아직 부족해요 (60점 이상 필요)."
+            result_msg = (
+                f"## ❌ 인증 실패 — {user_id}\n\n"
+                f"- **활동**: {result['activity']}\n"
+                f"- **점수**: {result['score']}점\n"
+                f"- **한 줄 평**: {result['comment']}\n\n"
+                f"{reason}\n목표: **{goal['goal']}** 관련 사진으로 다시 도전해봐요!"
+            )
+
+        return result_msg
     except Exception as e:
         return f"[ERROR] {type(e).__name__}: {e}"
 
@@ -275,14 +296,21 @@ def get_progress(user_id: str) -> str:
 
     lines = [f"## {user_id}님의 갓생 진행 상황\n"]
     for g in goals:
-        cnt = _count_checkins(g["id"])
-        rate = round(cnt / g["target_days"] * 100)
+        verified_cnt = _count_checkins(g["id"])
+        with get_db() as conn:
+            total_attempts = conn.execute(
+                "SELECT COUNT(DISTINCT date) AS cnt FROM checkins WHERE goal_id = ?",
+                (g["id"],),
+            ).fetchone()["cnt"]
+
+        rate = round(verified_cnt / g["target_days"] * 100)
         emoji = CATEGORY_EMOJI.get(g["category"], "✅")
-        filled = min(cnt, 10)
+        filled = min(round(verified_cnt / g["target_days"] * 10), 10)
         bar = "█" * filled + "░" * (10 - filled)
+        attempt_note = f" (시도 {total_attempts}회)" if total_attempts > verified_cnt else ""
         lines.append(
             f"{emoji} **{g['category']}** — {g['goal']}\n"
-            f"   {bar} {cnt}/{g['target_days']}일 ({rate}%)\n"
+            f"   {bar} {verified_cnt}/{g['target_days']}일 인증 완료 ({rate}%){attempt_note}\n"
         )
 
     return "\n".join(lines)
@@ -452,7 +480,7 @@ def check_reminders(user_id: str) -> str:
     for g in goals:
         with get_db() as conn:
             done_today = conn.execute(
-                "SELECT 1 FROM checkins WHERE goal_id = ? AND date = ?",
+                "SELECT 1 FROM checkins WHERE goal_id = ? AND date = ? AND verified = 1",
                 (g["id"], today),
             ).fetchone()
 
@@ -462,7 +490,7 @@ def check_reminders(user_id: str) -> str:
         # 연속 달성 스트릭 계산
         with get_db() as conn:
             dates = conn.execute(
-                "SELECT DISTINCT date FROM checkins WHERE goal_id = ? ORDER BY date DESC LIMIT 30",
+                "SELECT DISTINCT date FROM checkins WHERE goal_id = ? AND verified = 1 ORDER BY date DESC LIMIT 30",
                 (g["id"],),
             ).fetchall()
         dates = [r[0] for r in dates]
