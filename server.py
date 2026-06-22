@@ -1,11 +1,12 @@
 import os
+import re
 import json
 import base64
 import sqlite3
 from datetime import datetime
 
 import httpx
-import anthropic
+import google.generativeai as genai
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -17,11 +18,20 @@ port = int(os.getenv("PORT", "8000"))
 mcp = FastMCP("godsaeng-salon", host="0.0.0.0", port=port)
 
 
-def get_client():
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+def get_model(model_name: str = "gemini-2.0-flash"):
+    api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY is not configured.")
-    return anthropic.Anthropic(api_key=api_key)
+        raise ValueError("GOOGLE_API_KEY is not configured.")
+    genai.configure(api_key=api_key)
+    return genai.GenerativeModel(model_name)
+
+
+def extract_json(text: str) -> dict:
+    text = text.strip()
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if match:
+        return json.loads(match.group())
+    return json.loads(text)
 
 
 DB_PATH = "scores.db"
@@ -95,38 +105,22 @@ def analyze_photo(image_url: str, user_id: str, room_id: str) -> str:
     media_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
     image_b64 = base64.standard_b64encode(resp.content).decode("utf-8")
 
-    message = get_client().messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=256,
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": media_type,
-                        "data": image_b64,
-                    },
-                },
-                {
-                    "type": "text",
-                    "text": (
-                        "이 사진을 분석하여 아래 JSON 형식으로만 응답하세요. "
-                        "다른 텍스트는 절대 포함하지 마세요.\n\n"
-                        "{\n"
-                        '  "activity": "카공/헬스/독서/업무/침대눕방/게임/배달음식/기타 중 하나",\n'
-                        '  "godsaeng": 0~30 사이 정수,\n'
-                        '  "dopamine": 0~30 사이 정수,\n'
-                        '  "comment": "20자 이내 찰진 한 줄 평"\n'
-                        "}"
-                    ),
-                },
-            ],
-        }],
-    )
+    model = get_model()
+    response = model.generate_content([
+        {"inline_data": {"mime_type": media_type, "data": image_b64}},
+        (
+            "이 사진을 분석하여 아래 JSON 형식으로만 응답하세요. "
+            "다른 텍스트는 절대 포함하지 마세요.\n\n"
+            "{\n"
+            '  "activity": "카공/헬스/독서/업무/침대눕방/게임/배달음식/기타 중 하나",\n'
+            '  "godsaeng": 0~30 사이 정수,\n'
+            '  "dopamine": 0~30 사이 정수,\n'
+            '  "comment": "20자 이내 찰진 한 줄 평"\n'
+            "}"
+        ),
+    ])
 
-    result = json.loads(message.content[0].text.strip())
+    result = extract_json(response.text)
     today = datetime.now().strftime("%Y-%m-%d")
 
     with get_db() as conn:
@@ -212,28 +206,22 @@ def generate_briefing(room_id: str, date: str = "") -> str:
     mvp = scores[0]["user_id"]
     laziest = max(scores, key=lambda x: x["dopamine"])["user_id"]
 
-    message = get_client().messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=512,
-        messages=[{
-            "role": "user",
-            "content": (
-                f"다음 데이터로 갓생살롱 데일리 어워드 브리핑을 작성하세요.\n\n"
-                f"날짜: {date}\n"
-                f"MVP(갓생 1위): {mvp}\n"
-                f"베짱이(도파민 1위): {laziest}\n"
-                f"점수 데이터: {json.dumps(scores, ensure_ascii=False)}\n\n"
-                "조건:\n"
-                "- 갓생 점수 1위 → MVP 어워드\n"
-                "- 도파민 점수 1위 → 베짱이 어워드\n"
-                "- 각 수상자에게 칭찬인 척 깎는 or 공감인 척 찌르는 멘트\n"
-                "- 방 전체 총평 한 줄\n"
-                "- 이모지 적당히, 전체 200자 이내"
-            ),
-        }],
+    model = get_model()
+    response = model.generate_content(
+        f"다음 데이터로 갓생살롱 데일리 어워드 브리핑을 작성하세요.\n\n"
+        f"날짜: {date}\n"
+        f"MVP(갓생 1위): {mvp}\n"
+        f"베짱이(도파민 1위): {laziest}\n"
+        f"점수 데이터: {json.dumps(scores, ensure_ascii=False)}\n\n"
+        "조건:\n"
+        "- 갓생 점수 1위 → MVP 어워드\n"
+        "- 도파민 점수 1위 → 베짱이 어워드\n"
+        "- 각 수상자에게 칭찬인 척 깎는 or 공감인 척 찌르는 멘트\n"
+        "- 방 전체 총평 한 줄\n"
+        "- 이모지 적당히, 전체 200자 이내"
     )
 
-    return message.content[0].text
+    return response.text
 
 
 if __name__ == "__main__":
