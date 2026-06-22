@@ -112,8 +112,8 @@ def analyze_photo(image_url: str, user_id: str, room_id: str) -> str:
         response = client.models.generate_content(
             model=MODEL,
             contents=[
-                types.Part.from_bytes(data=image_bytes, mime_type=media_type),
-                types.Part.from_text(
+                types.Part(inline_data=types.Blob(mime_type=media_type, data=image_bytes)),
+                types.Part(text=(
                     "이 사진을 분석하여 아래 JSON 형식으로만 응답하세요. "
                     "다른 텍스트는 절대 포함하지 마세요.\n\n"
                     "{\n"
@@ -122,7 +122,7 @@ def analyze_photo(image_url: str, user_id: str, room_id: str) -> str:
                     '  "dopamine": 0~30 사이 정수,\n'
                     '  "comment": "20자 이내 찰진 한 줄 평"\n'
                     "}"
-                ),
+                )),
             ],
         )
 
@@ -217,7 +217,7 @@ def generate_briefing(room_id: str, date: str = "") -> str:
     client = get_client()
     response = client.models.generate_content(
         model=MODEL,
-        contents=types.Part.from_text(
+        contents=types.Part(text=(
             f"다음 데이터로 갓생살롱 데일리 어워드 브리핑을 작성하세요.\n\n"
             f"날짜: {date}\n"
             f"MVP(갓생 1위): {mvp}\n"
@@ -229,7 +229,7 @@ def generate_briefing(room_id: str, date: str = "") -> str:
             "- 각 수상자에게 칭찬인 척 깎는 or 공감인 척 찌르는 멘트\n"
             "- 방 전체 총평 한 줄\n"
             "- 이모지 적당히, 전체 200자 이내"
-        ),
+        )),
     )
 
     return response.text
