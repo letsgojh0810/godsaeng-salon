@@ -141,12 +141,45 @@ def set_goal(user_id: str, category: str, goal: str, target_days: int = 30) -> s
         conn.commit()
 
     emoji = CATEGORY_EMOJI[category]
+
+    # 자동 마일스톤 리마인더 생성
+    from datetime import timedelta
+    today = datetime.now().date()
+    auto_reminders = []
+
+    milestone_messages = {
+        7:  f"{emoji} {category} 7일 달성! 중간 점검할 때야 🔥",
+        14: f"{emoji} {category} 2주 완주! 이제 습관이 되고 있어 💪",
+        target_days: f"{emoji} {category} {target_days}일 도전 완료! 오늘이 마지막 날이야 🏆",
+    }
+    for day_offset, msg in milestone_messages.items():
+        if day_offset <= target_days:
+            remind_date = (today + timedelta(days=day_offset)).strftime("%Y-%m-%d")
+            auto_reminders.append((user_id, msg, remind_date))
+
+    if auto_reminders:
+        with get_db() as conn:
+            conn.executemany(
+                "INSERT INTO reminders (user_id, message, remind_date) VALUES (?, ?, ?)",
+                auto_reminders,
+            )
+            conn.commit()
+
+    daily_hint = ""
+    if category == "미라클모닝":
+        daily_hint = "\n\n매일 아침 몇 시에 알림 드릴까요? `set_daily_reminder`로 설정 가능해요 ⏰"
+    elif category == "운동":
+        daily_hint = "\n\n매일 운동 시간에 알림 받을래요? `set_daily_reminder`로 설정 가능해요 💪"
+    else:
+        daily_hint = "\n\n매일 알림 받고 싶으면 `set_daily_reminder`로 설정할 수 있어요!"
+
     return (
         f"## {emoji} 목표 설정 완료!\n\n"
         f"- **카테고리**: {category}\n"
         f"- **목표**: {goal}\n"
         f"- **기간**: {target_days}일\n\n"
-        f"{target_days}일 동안 같이 해보자! 나중에 인증샷 보내줘 🔥"
+        f"7일, 14일, {target_days}일 마일스톤 알림도 자동 등록했어요 🎯"
+        f"{daily_hint}"
     )
 
 
@@ -298,6 +331,51 @@ def generate_daily_plan(user_id: str) -> str:
 
 @mcp.tool(
     annotations=ToolAnnotations(
+        title="Set Daily Reminder",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=False,
+    )
+)
+def set_daily_reminder(user_id: str, message: str, start_date: str, days: int = 30) -> str:
+    """Sets a recurring daily reminder for a user in GodSaeng Salon(갓생살롱). Creates individual reminders for each day from start_date over the given number of days. Ideal for daily habits like 미라클모닝(early rising) or workout routines.
+
+    Args:
+        user_id:    User ID
+        message:    Reminder message (e.g., 미라클모닝! 일어날 시간이야 🌅, 오늘 운동 했어? 💪)
+        start_date: First reminder date in YYYY-MM-DD format
+        days:       Number of days to repeat (default 30)
+    """
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    except ValueError:
+        return "날짜 형식이 잘못됐어요. YYYY-MM-DD 형식으로 입력해주세요. (예: 2026-06-28)"
+
+    from datetime import timedelta
+    reminders = [
+        (user_id, message, (start + timedelta(days=i)).strftime("%Y-%m-%d"))
+        for i in range(days)
+    ]
+
+    with get_db() as conn:
+        conn.executemany(
+            "INSERT INTO reminders (user_id, message, remind_date) VALUES (?, ?, ?)",
+            reminders,
+        )
+        conn.commit()
+
+    end_date = (start + timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    return (
+        f"## ⏰ 매일 알림 설정 완료!\n\n"
+        f"- **내용**: {message}\n"
+        f"- **기간**: {start_date} ~ {end_date} ({days}일)\n\n"
+        f"매일 대화 시작할 때 알림이 뜰 거야. 꾸준히 해보자! 🔥"
+    )
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
         title="Set Reminder",
         readOnlyHint=False,
         destructiveHint=False,
@@ -343,7 +421,7 @@ def set_reminder(user_id: str, message: str, remind_date: str) -> str:
     )
 )
 def check_reminders(user_id: str) -> str:
-    """Checks today's and upcoming reminders for a user in GodSaeng Salon(갓생살롱). Call this at the start of each conversation to surface timely alerts.
+    """Checks today's reminders, upcoming schedule, and goal check-in status for a user in GodSaeng Salon(갓생살롱). Always call this at the start of each conversation to proactively surface alerts and streak info.
 
     Args:
         user_id: User ID
@@ -351,39 +429,58 @@ def check_reminders(user_id: str) -> str:
     today = datetime.now().strftime("%Y-%m-%d")
 
     with get_db() as conn:
-        rows = conn.execute(
+        reminder_rows = conn.execute(
             """SELECT * FROM reminders
                WHERE user_id = ? AND done = 0 AND remind_date >= ?
                ORDER BY remind_date ASC LIMIT 10""",
             (user_id, today),
         ).fetchall()
 
-    if not rows:
-        return "예정된 리마인더가 없어요."
-
     today_items = []
     upcoming_items = []
-
-    for r in rows:
+    for r in reminder_rows:
         r = dict(r)
         if r["remind_date"] == today:
             today_items.append(r)
         else:
             upcoming_items.append(r)
 
-    lines = []
-    if today_items:
-        lines.append("## ⏰ 오늘 리마인더\n")
-        for r in today_items:
-            lines.append(f"- {r['message']}")
-        lines.append("")
+    # 오늘 체크인 안 한 목표 찾기
+    goals = _get_user_goals(user_id)
+    unchecked = []
+    streaks = []
+    for g in goals:
+        with get_db() as conn:
+            done_today = conn.execute(
+                "SELECT 1 FROM checkins WHERE goal_id = ? AND date = ?",
+                (g["id"], today),
+            ).fetchone()
 
-    if upcoming_items:
-        lines.append("## 📅 다가오는 일정\n")
-        for r in upcoming_items:
-            lines.append(f"- **{r['remind_date']}** {r['message']}")
+        if not done_today:
+            unchecked.append(g)
 
-    # 오늘 것은 완료 처리
+        # 연속 달성 스트릭 계산
+        with get_db() as conn:
+            dates = conn.execute(
+                "SELECT DISTINCT date FROM checkins WHERE goal_id = ? ORDER BY date DESC LIMIT 30",
+                (g["id"],),
+            ).fetchall()
+        dates = [r[0] for r in dates]
+
+        streak = 0
+        from datetime import timedelta, date as date_type
+        check_date = datetime.strptime(today, "%Y-%m-%d").date()
+        for d in dates:
+            if d == check_date.strftime("%Y-%m-%d"):
+                streak += 1
+                check_date -= timedelta(days=1)
+            else:
+                break
+        if streak > 1:
+            emoji = CATEGORY_EMOJI.get(g["category"], "✅")
+            streaks.append(f"{emoji} **{g['category']}** {streak}일 연속 달성 중!")
+
+    # 오늘 것 완료 처리
     if today_items:
         ids = [r["id"] for r in today_items]
         with get_db() as conn:
@@ -392,6 +489,34 @@ def check_reminders(user_id: str) -> str:
                 ids,
             )
             conn.commit()
+
+    lines = []
+
+    if today_items:
+        lines.append("## ⏰ 오늘 알림\n")
+        for r in today_items:
+            lines.append(f"- {r['message']}")
+        lines.append("")
+
+    if streaks:
+        lines.append("## 🔥 연속 달성\n")
+        lines.extend(streaks)
+        lines.append("")
+
+    if unchecked:
+        lines.append("## 📸 오늘 체크인 대기 중\n")
+        for g in unchecked:
+            emoji = CATEGORY_EMOJI.get(g["category"], "✅")
+            lines.append(f"- {emoji} **{g['category']}** — {g['goal']} (아직 인증 안 했어요!)")
+        lines.append("")
+
+    if upcoming_items:
+        lines.append("## 📅 다가오는 일정\n")
+        for r in upcoming_items[:3]:
+            lines.append(f"- **{r['remind_date']}** {r['message']}")
+
+    if not lines:
+        return "오늘 알림도 없고 모든 목표 체크인 완료! 갓생 살고 있네 🏆"
 
     return "\n".join(lines)
 
