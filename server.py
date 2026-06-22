@@ -303,19 +303,28 @@ def check_in(image_url: str, user_id: str, category: str) -> str:
             verified_cnt = _count_checkins(goal["id"])
             result_msg = (
                 f"## {emoji} 인증 통과! — {user_id}\n\n"
-                f"- **활동**: {result['activity']}\n"
-                f"- **점수**: {result['score']}점 ✅\n"
-                f"- **한 줄 평**: {result['comment']}\n\n"
+                f"### 📷 사진 분석 결과\n"
+                f"- **감지된 활동**: {result['activity']}\n"
+                f"- **달성도 점수**: {result['score']}점 ✅\n"
+                f"- **AI 한 줄 평**: {result['comment']}\n\n"
+                f"---\n"
                 f"오늘 달성 기록됐어! 누적 **{verified_cnt}일** 완료 🔥"
             )
         else:
-            reason = "목표와 관련 없는 사진이에요." if not result.get("goal_matched") else f"점수가 {result['score']}점으로 아직 부족해요 (60점 이상 필요)."
+            if not result.get("goal_matched"):
+                reason = f"사진에서 **{result['activity']}**이(가) 감지됐는데, {category} 목표와 맞지 않아요."
+            else:
+                reason = f"사진에서 **{result['activity']}**이(가) 감지됐지만 달성도가 {result['score']}점으로 부족해요 (60점 이상 필요)."
+
             result_msg = (
                 f"## ❌ 인증 실패 — {user_id}\n\n"
-                f"- **활동**: {result['activity']}\n"
-                f"- **점수**: {result['score']}점\n"
-                f"- **한 줄 평**: {result['comment']}\n\n"
-                f"{reason}\n목표: **{goal['goal']}** 관련 사진으로 다시 도전해봐요!"
+                f"### 📷 사진 분석 결과\n"
+                f"- **감지된 활동**: {result['activity']}\n"
+                f"- **달성도 점수**: {result['score']}점\n"
+                f"- **AI 한 줄 평**: {result['comment']}\n\n"
+                f"---\n"
+                f"{reason}\n\n"
+                f"목표 **{goal['goal']}** 인증을 위한 사진으로 다시 도전해봐요!"
             )
 
         return result_msg
