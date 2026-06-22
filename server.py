@@ -184,4 +184,4 @@ def generate_briefing(room_id: str, date: str = "") -> str:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="sse")
+    mcp.run(transport="streamable-http")
