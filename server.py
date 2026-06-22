@@ -6,7 +6,8 @@ import sqlite3
 from datetime import datetime
 
 import httpx
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -17,13 +18,14 @@ port = int(os.getenv("PORT", "8000"))
 
 mcp = FastMCP("godsaeng-salon", host="0.0.0.0", port=port)
 
+MODEL = "gemini-2.5-flash"
 
-def get_model(model_name: str = "gemini-1.5-flash"):
+
+def get_client():
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise ValueError("GOOGLE_API_KEY is not configured.")
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel(model_name)
+    return genai.Client(api_key=api_key)
 
 
 def extract_json(text: str) -> dict:
@@ -104,22 +106,25 @@ def analyze_photo(image_url: str, user_id: str, room_id: str) -> str:
         resp.raise_for_status()
 
         media_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
-        image_b64 = base64.standard_b64encode(resp.content).decode("utf-8")
+        image_bytes = resp.content
 
-        model = get_model()
-        response = model.generate_content([
-            {"inline_data": {"mime_type": media_type, "data": image_b64}},
-            (
-                "이 사진을 분석하여 아래 JSON 형식으로만 응답하세요. "
-                "다른 텍스트는 절대 포함하지 마세요.\n\n"
-                "{\n"
-                '  "activity": "카공/헬스/독서/업무/침대눕방/게임/배달음식/기타 중 하나",\n'
-                '  "godsaeng": 0~30 사이 정수,\n'
-                '  "dopamine": 0~30 사이 정수,\n'
-                '  "comment": "20자 이내 찰진 한 줄 평"\n'
-                "}"
-            ),
-        ])
+        client = get_client()
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=[
+                types.Part.from_bytes(data=image_bytes, mime_type=media_type),
+                types.Part.from_text(
+                    "이 사진을 분석하여 아래 JSON 형식으로만 응답하세요. "
+                    "다른 텍스트는 절대 포함하지 마세요.\n\n"
+                    "{\n"
+                    '  "activity": "카공/헬스/독서/업무/침대눕방/게임/배달음식/기타 중 하나",\n'
+                    '  "godsaeng": 0~30 사이 정수,\n'
+                    '  "dopamine": 0~30 사이 정수,\n'
+                    '  "comment": "20자 이내 찰진 한 줄 평"\n'
+                    "}"
+                ),
+            ],
+        )
 
         result = extract_json(response.text)
         today = datetime.now().strftime("%Y-%m-%d")
@@ -209,19 +214,22 @@ def generate_briefing(room_id: str, date: str = "") -> str:
     mvp = scores[0]["user_id"]
     laziest = max(scores, key=lambda x: x["dopamine"])["user_id"]
 
-    model = get_model()
-    response = model.generate_content(
-        f"다음 데이터로 갓생살롱 데일리 어워드 브리핑을 작성하세요.\n\n"
-        f"날짜: {date}\n"
-        f"MVP(갓생 1위): {mvp}\n"
-        f"베짱이(도파민 1위): {laziest}\n"
-        f"점수 데이터: {json.dumps(scores, ensure_ascii=False)}\n\n"
-        "조건:\n"
-        "- 갓생 점수 1위 → MVP 어워드\n"
-        "- 도파민 점수 1위 → 베짱이 어워드\n"
-        "- 각 수상자에게 칭찬인 척 깎는 or 공감인 척 찌르는 멘트\n"
-        "- 방 전체 총평 한 줄\n"
-        "- 이모지 적당히, 전체 200자 이내"
+    client = get_client()
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=types.Part.from_text(
+            f"다음 데이터로 갓생살롱 데일리 어워드 브리핑을 작성하세요.\n\n"
+            f"날짜: {date}\n"
+            f"MVP(갓생 1위): {mvp}\n"
+            f"베짱이(도파민 1위): {laziest}\n"
+            f"점수 데이터: {json.dumps(scores, ensure_ascii=False)}\n\n"
+            "조건:\n"
+            "- 갓생 점수 1위 → MVP 어워드\n"
+            "- 도파민 점수 1위 → 베짱이 어워드\n"
+            "- 각 수상자에게 칭찬인 척 깎는 or 공감인 척 찌르는 멘트\n"
+            "- 방 전체 총평 한 줄\n"
+            "- 이모지 적당히, 전체 200자 이내"
+        ),
     )
 
     return response.text
