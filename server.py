@@ -20,6 +20,40 @@ MODEL = "gemini-2.5-flash"
 CATEGORY_EMOJI = {"운동": "💪", "다이어트": "🥗", "공부": "📚", "취미": "🎯", "미라클모닝": "🌅"}
 VALID_CATEGORIES = list(CATEGORY_EMOJI.keys())
 
+# 카테고리별 인증 기준 (Gemini 프롬프트에 삽입)
+CATEGORY_VERIFY_GUIDE = {
+    "운동": (
+        "운동 인증 사진입니다. 헬스장 기구, 운동복, 땀 흘리는 모습, 야외 러닝, 홈트 장면처럼 "
+        "신체 활동을 직접 증명하는 사진이어야 합니다. 일상 사진이나 음식 사진은 목표 불일치입니다."
+    ),
+    "다이어트": (
+        "다이어트 식단 인증 사진입니다. 샐러드, 닭가슴살, 채소 위주 식단, 저칼로리 건강식이어야 합니다. "
+        "피자, 치킨, 햄버거, 라면, 떡볶이 등 고칼로리 음식이 보이면 목표 불일치입니다."
+    ),
+    "공부": (
+        "공부 인증 사진입니다. 책, 교재, 노트 필기, 강의 화면, 문제풀이 중인 손, 독서실/카페 공부 환경처럼 "
+        "학습 활동을 직접 증명해야 합니다. 스마트폰만 보이거나 관계없는 사진은 목표 불일치입니다."
+    ),
+    "취미": (
+        "취미 활동 인증 사진입니다. 악기 연주, 그림/드로잉, 요리 완성본, 뜨개질, 독서 중인 모습처럼 "
+        "취미 활동 중이거나 활동 결과물이 보여야 합니다. 아무 연관 없는 사진은 목표 불일치입니다."
+    ),
+    "미라클모닝": (
+        "미라클모닝(이른 기상) 인증 사진입니다. 아침 거울 셀카, 기상 직후 모습, 밝아오는 창밖 풍경, "
+        "아침 스트레칭/명상/일기 쓰기 장면처럼 이른 아침 기상을 증명해야 합니다. "
+        "침대에 누워있는 사진이나 늦은 시간대 사진은 목표 불일치입니다."
+    ),
+}
+
+# 카테고리별 주간 기본 목표 횟수
+CATEGORY_WEEKLY_DEFAULT = {
+    "운동": 3,
+    "다이어트": 7,
+    "공부": 5,
+    "취미": 3,
+    "미라클모닝": 7,
+}
+
 
 def get_client():
     api_key = os.getenv("GOOGLE_API_KEY")
@@ -49,14 +83,19 @@ def init_db():
     with get_db() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS goals (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id     TEXT    NOT NULL,
-                category    TEXT    NOT NULL,
-                goal        TEXT    NOT NULL,
-                target_days INTEGER DEFAULT 30,
-                created_at  TEXT    DEFAULT CURRENT_TIMESTAMP
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id       TEXT    NOT NULL,
+                category      TEXT    NOT NULL,
+                goal          TEXT    NOT NULL,
+                target_days   INTEGER DEFAULT 30,
+                weekly_target INTEGER DEFAULT 5,
+                created_at    TEXT    DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        try:
+            conn.execute("ALTER TABLE goals ADD COLUMN weekly_target INTEGER DEFAULT 5")
+        except Exception:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS checkins (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -128,22 +167,25 @@ def _count_checkins(goal_id: int) -> int:
         openWorldHint=False,
     )
 )
-def set_goal(user_id: str, category: str, goal: str, target_days: int = 30) -> str:
+def set_goal(user_id: str, category: str, goal: str, target_days: int = 30, weekly_target: int = 0) -> str:
     """Sets a new productivity goal for a user in GodSaeng Salon(갓생살롱). Supported categories: 운동, 다이어트, 공부, 취미, 미라클모닝.
 
     Args:
-        user_id:     User ID (e.g., minjun)
-        category:    Goal category — 운동/다이어트/공부/취미/미라클모닝
-        goal:        Specific goal description (e.g., 헬스 주 3회, 매일 독서 30분, 매일 6시 기상)
-        target_days: Number of days to maintain the goal (default 30)
+        user_id:       User ID (e.g., minjun)
+        category:      Goal category — 운동/다이어트/공부/취미/미라클모닝
+        goal:          Specific goal description (e.g., 헬스 주 3회, 매일 독서 30분, 매일 6시 기상)
+        target_days:   Number of days to maintain the goal (default 30)
+        weekly_target: Target check-ins per week (0 = use category default: 운동 3, 다이어트 7, 공부 5, 취미 3, 미라클모닝 7)
     """
     if category not in VALID_CATEGORIES:
         return f"카테고리는 {', '.join(VALID_CATEGORIES)} 중 하나여야 해요."
 
+    wt = weekly_target if weekly_target > 0 else CATEGORY_WEEKLY_DEFAULT.get(category, 5)
+
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO goals (user_id, category, goal, target_days) VALUES (?, ?, ?, ?)",
-            (user_id, category, goal, target_days),
+            "INSERT INTO goals (user_id, category, goal, target_days, weekly_target) VALUES (?, ?, ?, ?, ?)",
+            (user_id, category, goal, target_days, wt),
         )
         conn.commit()
 
@@ -180,11 +222,15 @@ def set_goal(user_id: str, category: str, goal: str, target_days: int = 30) -> s
     else:
         daily_hint = "\n\n매일 알림 받고 싶으면 `set_daily_reminder`로 설정할 수 있어요!"
 
+    verify_guide = CATEGORY_VERIFY_GUIDE.get(category, "")
+    verify_hint = f"\n\n**인증 방법**: {verify_guide.split('.')[0]}." if verify_guide else ""
+
     return (
         f"## {emoji} 목표 설정 완료!\n\n"
         f"- **카테고리**: {category}\n"
         f"- **목표**: {goal}\n"
-        f"- **기간**: {target_days}일\n\n"
+        f"- **기간**: {target_days}일 / 주 {wt}회 목표\n"
+        f"{verify_hint}\n\n"
         f"7일, 14일, {target_days}일 마일스톤 알림도 자동 등록했어요 🎯"
         f"{daily_hint}"
     )
@@ -218,19 +264,22 @@ def check_in(image_url: str, user_id: str, category: str) -> str:
         media_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
         today = datetime.now().strftime("%Y-%m-%d")
 
+        verify_guide = CATEGORY_VERIFY_GUIDE.get(category, f"{category} 관련 활동 사진이어야 합니다.")
+
         client = get_client()
         response = client.models.generate_content(
             model=MODEL,
             contents=[
                 types.Part(inline_data=types.Blob(mime_type=media_type, data=resp.content)),
                 types.Part(text=(
-                    f"이 사진을 분석해주세요. 유저의 목표는 [{category}: {goal['goal']}]입니다.\n"
-                    "아래 JSON 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.\n\n"
+                    f"[인증 기준] {verify_guide}\n\n"
+                    f"유저 목표: {goal['goal']}\n\n"
+                    "위 기준에 따라 사진을 판별하고 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.\n\n"
                     "{\n"
                     '  "activity": "사진에서 보이는 활동 (10자 이내)",\n'
                     '  "goal_matched": true 또는 false,\n'
-                    '  "score": 0~100 사이 정수,\n'
-                    '  "comment": "20자 이내 찰진 응원 한 줄"\n'
+                    '  "score": 0~100 사이 정수 (기준 충족도),\n'
+                    '  "comment": "20자 이내 찰진 응원 또는 피드백 한 줄"\n'
                     "}"
                 )),
             ],
@@ -355,6 +404,110 @@ def generate_daily_plan(user_id: str) -> str:
     )
 
     return response.text
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="Get Weekly Report",
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+def get_weekly_report(user_id: str) -> str:
+    """Generates a weekly achievement report for a user in GodSaeng Salon(갓생살롱). Shows day-by-day check-in results for each goal, whether the weekly target was met, and encouraging or celebratory feedback.
+
+    Args:
+        user_id: User ID
+    """
+    from datetime import timedelta, date as date_type
+
+    today = datetime.now().date()
+    week_start = today - timedelta(days=today.weekday())  # 이번 주 월요일
+    week_dates = [(week_start + timedelta(days=i)) for i in range(7)]
+    week_labels = ["월", "화", "수", "목", "금", "토", "일"]
+
+    goals = _get_user_goals(user_id)
+    if not goals:
+        return "설정된 목표가 없어요. 먼저 목표를 설정해주세요!"
+
+    lines = [
+        f"## {user_id}님의 주간 갓생 리포트",
+        f"📅 {week_start.strftime('%m/%d')} ~ {week_dates[-1].strftime('%m/%d')}\n",
+    ]
+
+    total_goals = len(goals)
+    perfect_goals = 0
+    goal_summaries = []
+
+    for g in goals:
+        emoji = CATEGORY_EMOJI.get(g["category"], "✅")
+        weekly_target = g.get("weekly_target") or CATEGORY_WEEKLY_DEFAULT.get(g["category"], 5)
+
+        # 이번 주 날짜별 verified 체크인 조회
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT date FROM checkins WHERE goal_id = ? AND verified = 1",
+                (g["id"],),
+            ).fetchall()
+        verified_dates = {r[0] for r in rows}
+
+        day_marks = []
+        verified_this_week = 0
+        for d in week_dates:
+            ds = d.strftime("%Y-%m-%d")
+            if d > today:
+                day_marks.append("⬜")  # 아직 안 온 날
+            elif ds in verified_dates:
+                day_marks.append("✅")
+                verified_this_week += 1
+            else:
+                day_marks.append("❌")
+
+        achieved = verified_this_week >= weekly_target
+        if achieved:
+            perfect_goals += 1
+
+        label_row = " ".join(week_labels)
+        mark_row = " ".join(day_marks)
+        status = f"🏆 주간 목표 달성! ({verified_this_week}/{weekly_target}회)" if achieved else f"진행 중 {verified_this_week}/{weekly_target}회"
+
+        goal_summaries.append({
+            "category": g["category"],
+            "goal": g["goal"],
+            "achieved": achieved,
+            "verified": verified_this_week,
+            "target": weekly_target,
+        })
+
+        lines.append(
+            f"{emoji} **{g['category']}** — {g['goal']}\n"
+            f"   {label_row}\n"
+            f"   {mark_row}\n"
+            f"   {status}\n"
+        )
+
+    # 총평 메시지
+    if perfect_goals == total_goals:
+        lines.append("---\n🎉 **모든 목표 완벽 달성!** 이번 주 진짜 갓생 살았네! 대단해 🏆")
+    else:
+        missed = [g for g in goal_summaries if not g["achieved"]]
+        encouragements = {
+            "운동": "운동은 꾸준함이 전부야. 다음 주엔 더 할 수 있어 💪",
+            "다이어트": "식단 조절 쉽지 않지. 조금씩이라도 계속 해봐 🥗",
+            "공부": "공부한 날도 있잖아! 그 날들이 쌓여. 계속 해 📚",
+            "취미": "바쁜 일상에도 나를 위한 시간, 꼭 만들어봐 🎯",
+            "미라클모닝": "아침형 인간이 되는 건 진짜 어려워. 그래도 포기하지 마 🌅",
+        }
+        lines.append("---")
+        for m in missed:
+            enc = encouragements.get(m["category"], "다음 주엔 더 잘 할 수 있어! 화이팅!")
+            lines.append(f"💬 **{m['category']}**: {enc}")
+        if perfect_goals > 0:
+            lines.append(f"\n✨ {perfect_goals}개 목표는 달성했어! 부분 성공도 성공이야 😊")
+
+    return "\n".join(lines)
 
 
 @mcp.tool(
