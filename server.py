@@ -18,7 +18,7 @@ port = int(os.getenv("PORT", "8000"))
 mcp = FastMCP("godsaeng-salon", host="0.0.0.0", port=port)
 
 
-def get_model(model_name: str = "gemini-2.0-flash"):
+def get_model(model_name: str = "gemini-1.5-flash"):
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise ValueError("GOOGLE_API_KEY is not configured.")
