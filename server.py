@@ -14,7 +14,12 @@ load_dotenv()
 port = int(os.getenv("PORT", "8000"))
 
 mcp = FastMCP("godsaeng-salon", host="0.0.0.0", port=port)
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+def get_client():
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY가 설정되지 않았습니다.")
+    return anthropic.Anthropic(api_key=api_key)
 
 DB_PATH = "scores.db"
 
@@ -62,7 +67,7 @@ def analyze_photo(image_url: str, user_id: str, room_id: str) -> dict:
     media_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
     image_b64 = base64.standard_b64encode(resp.content).decode("utf-8")
 
-    message = client.messages.create(
+    message = get_client().messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=256,
         messages=[{
@@ -161,7 +166,7 @@ def generate_briefing(room_id: str, date: str = "") -> str:
     if not data["scores"]:
         return "오늘 인증 데이터가 없어요. 내일은 꼭 올려주세요. 기억하고 있을게요. 🤖"
 
-    message = client.messages.create(
+    message = get_client().messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=512,
         messages=[{
