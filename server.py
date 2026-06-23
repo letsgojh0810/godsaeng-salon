@@ -711,5 +711,107 @@ def check_reminders(user_id: str) -> str:
     return "\n".join(lines)
 
 
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="Load Demo Data",
+        readOnlyHint=False,
+        destructiveHint=True,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+)
+def load_demo_data(user_id: str) -> str:
+    """Loads realistic demo data for a user in GodSaeng Salon(갓생살롱) for showcase and testing purposes. Resets all existing data for the user and inserts 3 goals with 14 days of check-in history and reminders.
+
+    Args:
+        user_id: User ID to populate with demo data (e.g., jh)
+    """
+    from datetime import timedelta
+
+    today = datetime.now().date()
+
+    # 기존 데이터 초기화
+    with get_db() as conn:
+        goal_ids_old = [r[0] for r in conn.execute("SELECT id FROM goals WHERE user_id = ?", (user_id,)).fetchall()]
+        for gid in goal_ids_old:
+            conn.execute("DELETE FROM checkins WHERE goal_id = ?", (gid,))
+        conn.execute("DELETE FROM goals WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM reminders WHERE user_id = ?", (user_id,))
+        conn.commit()
+
+    # 목표 3개 생성 (14일 전 시작)
+    created_at = (today - timedelta(days=14)).strftime("%Y-%m-%d")
+    demo_goals = [
+        ("운동",       "헬스 주 3회",       30, 3),
+        ("공부",       "매일 독서 30분",     30, 5),
+        ("미라클모닝", "매일 오전 6시 기상", 30, 7),
+    ]
+
+    goal_ids = {}
+    with get_db() as conn:
+        for category, goal, target_days, weekly_target in demo_goals:
+            cursor = conn.execute(
+                "INSERT INTO goals (user_id, category, goal, target_days, weekly_target, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (user_id, category, goal, target_days, weekly_target, created_at),
+            )
+            goal_ids[category] = cursor.lastrowid
+        conn.commit()
+
+    # 체크인 이력 (최근 14일, 오늘 제외)
+    # 운동: 월/수/금  공부: 월~금 (2일 빠짐)  미라클모닝: 평일 매일 + 지난주 토
+    checkins = []
+    for i in range(14, 0, -1):
+        d = today - timedelta(days=i)
+        wd = d.weekday()  # 0=월, 6=일
+        ds = d.strftime("%Y-%m-%d")
+
+        if wd in [0, 2, 4]:  # 운동
+            checkins.append((user_id, goal_ids["운동"], ds, "헬스 운동", 88, "오늘도 운동 완료! 💪", 1))
+
+        if wd in [0, 1, 2, 3, 4] and i not in [3, 11]:  # 공부 (2일 빠짐)
+            checkins.append((user_id, goal_ids["공부"], ds, "독서 중", 91, "집중력 최고야 📚", 1))
+
+        if wd in [0, 1, 2, 3, 4]:  # 미라클모닝 평일
+            checkins.append((user_id, goal_ids["미라클모닝"], ds, "아침 거울 셀카", 82, "6시 기상 성공! 🌅", 1))
+        elif wd == 5 and i > 7:  # 지난주 토요일 한 번
+            checkins.append((user_id, goal_ids["미라클모닝"], ds, "아침 거울 셀카", 78, "주말도 갓생! 🌅", 1))
+
+    with get_db() as conn:
+        conn.executemany(
+            "INSERT INTO checkins (user_id, goal_id, date, activity, score, comment, verified) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            checkins,
+        )
+        conn.commit()
+
+    # 리마인더: 미라클모닝 향후 14일 + 마일스톤
+    reminders = []
+    for i in range(1, 15):
+        reminders.append((user_id, "미라클모닝! 일어날 시간이야 🌅", (today + timedelta(days=i)).strftime("%Y-%m-%d")))
+
+    milestone_base = today - timedelta(days=14)
+    for offset, msg in [(16, "💪 운동 30일 도전 절반 돌파! 🔥"), (21, "📚 공부 3주 완주! 습관이 됐어 💪"), (30, "🌅 미라클모닝 30일 완료! 🏆")]:
+        reminders.append((user_id, msg, (milestone_base + timedelta(days=offset)).strftime("%Y-%m-%d")))
+
+    with get_db() as conn:
+        conn.executemany(
+            "INSERT INTO reminders (user_id, message, remind_date) VALUES (?, ?, ?)",
+            reminders,
+        )
+        conn.commit()
+
+    total_checkins = len(checkins)
+    return (
+        f"## 🎬 데모 데이터 로드 완료 — {user_id}\n\n"
+        f"### 설정된 목표 (14일 전 시작)\n"
+        f"- 💪 **운동**: 헬스 주 3회 (주 3회 목표)\n"
+        f"- 📚 **공부**: 매일 독서 30분 (주 5회 목표)\n"
+        f"- 🌅 **미라클모닝**: 매일 오전 6시 기상 (주 7회 목표)\n\n"
+        f"### 체크인 이력\n"
+        f"- 최근 14일간 **{total_checkins}회** 인증 완료\n"
+        f"- 운동 스트릭, 공부 2일 미달, 미라클모닝 주말 일부 포함\n\n"
+        f"이제 `get_progress`, `get_weekly_report`, `check_reminders` 로 확인해봐! 🔥"
+    )
+
+
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")
