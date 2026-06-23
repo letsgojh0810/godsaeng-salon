@@ -168,7 +168,7 @@ def _count_checkins(goal_id: int) -> int:
     )
 )
 def set_goal(category: str, goal: str, target_days: int = 30, weekly_target: int = 0, user_id: str = "jh") -> str:
-    """Sets a new productivity goal for a user in GodSaeng Salon(갓생살롱). Supported categories: 운동, 다이어트, 공부, 취미, 미라클모닝.
+    """Sets a new productivity goal for a user in 삶은 갓생. Supported categories: 운동, 다이어트, 공부, 취미, 미라클모닝.
 
     Args:
         category:      Goal category — 운동/다이어트/공부/취미/미라클모닝
@@ -246,7 +246,7 @@ def set_goal(category: str, goal: str, target_days: int = 30, weekly_target: int
     )
 )
 def check_in(image_url: str, category: str, user_id: str = "jh") -> str:
-    """Verifies goal achievement with a photo for GodSaeng Salon(갓생살롱). Analyzes the photo against the user's active goal and returns an encouraging score and feedback.
+    """Verifies goal achievement with a photo for 삶은 갓생. Analyzes the photo against the user's active goal and returns an encouraging score and feedback.
 
     Args:
         image_url: URL of the verification photo
@@ -342,7 +342,7 @@ def check_in(image_url: str, category: str, user_id: str = "jh") -> str:
     )
 )
 def get_progress(user_id: str = "jh") -> str:
-    """Retrieves goal achievement progress and check-in statistics for a user from GodSaeng Salon(갓생살롱). Shows all active goals with completion rates and progress bars.
+    """Retrieves goal achievement progress and check-in statistics for a user from 삶은 갓생. Shows all active goals with completion rates and progress bars.
 
     Args:
         user_id: User ID (default: jh)
@@ -384,7 +384,7 @@ def get_progress(user_id: str = "jh") -> str:
     )
 )
 def generate_daily_plan(user_id: str = "jh") -> str:
-    """Generates a personalized daily productivity plan using GodSaeng Salon(갓생살롱) based on the user's active goals. Includes time blocks and actionable tasks for today.
+    """Generates a personalized daily productivity plan using 삶은 갓생 based on the user's active goals. Includes time blocks and actionable tasks for today.
 
     Args:
         user_id: User ID (default: jh)
@@ -425,7 +425,7 @@ def generate_daily_plan(user_id: str = "jh") -> str:
     )
 )
 def get_weekly_report(user_id: str = "jh") -> str:
-    """Generates a weekly achievement report for a user in GodSaeng Salon(갓생살롱). Shows day-by-day check-in results for each goal, whether the weekly target was met, and encouraging or celebratory feedback.
+    """Generates a weekly achievement report for a user in 삶은 갓생. Shows day-by-day check-in results for each goal, whether the weekly target was met, and encouraging or celebratory feedback.
 
     Args:
         user_id: User ID (default: jh)
@@ -529,7 +529,7 @@ def get_weekly_report(user_id: str = "jh") -> str:
     )
 )
 def set_daily_reminder(message: str, start_date: str, days: int = 30, user_id: str = "jh") -> str:
-    """Sets a recurring daily reminder for a user in GodSaeng Salon(갓생살롱). Creates individual reminders for each day from start_date over the given number of days. Ideal for daily habits like 미라클모닝(early rising) or workout routines.
+    """Sets a recurring daily reminder for a user in 삶은 갓생. Creates individual reminders for each day from start_date over the given number of days. Ideal for daily habits like 미라클모닝(early rising) or workout routines.
 
     Args:
         message:    Reminder message (e.g., 미라클모닝! 일어날 시간이야 🌅, 오늘 운동 했어? 💪)
@@ -574,7 +574,7 @@ def set_daily_reminder(message: str, start_date: str, days: int = 30, user_id: s
     )
 )
 def set_reminder(message: str, remind_date: str, user_id: str = "jh") -> str:
-    """Saves a reminder for a user in GodSaeng Salon(갓생살롱) to be surfaced on the specified date.
+    """Saves a reminder for a user in 삶은 갓생 to be surfaced on the specified date.
 
     Args:
         message:     Reminder content (e.g., 결혼식, 병원 예약, 헬스 등록)
@@ -611,7 +611,7 @@ def set_reminder(message: str, remind_date: str, user_id: str = "jh") -> str:
     )
 )
 def check_reminders(user_id: str = "jh") -> str:
-    """Checks today's reminders, upcoming schedule, and goal check-in status for a user in GodSaeng Salon(갓생살롱). Always call this at the start of each conversation to proactively surface alerts and streak info.
+    """Checks today's reminders, upcoming schedule, and goal check-in status for a user in 삶은 갓생. Always call this at the start of each conversation to proactively surface alerts and streak info.
 
     Args:
         user_id: User ID (default: jh)
@@ -721,7 +721,7 @@ def check_reminders(user_id: str = "jh") -> str:
     )
 )
 def setup_my_profile(user_id: str = "jh") -> str:
-    """Sets up the GodSaeng Salon(갓생살롱) profile for a returning user by restoring their goals and recent activity history. Call this when a user says they want to start, resume, or check their goals.
+    """Sets up the 삶은 갓생 profile for a returning user by restoring their goals and recent activity history. Call this when a user says they want to start, resume, or check their goals.
 
     Args:
         user_id: User ID (default: jh)
