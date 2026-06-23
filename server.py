@@ -167,15 +167,15 @@ def _count_checkins(goal_id: int) -> int:
         openWorldHint=False,
     )
 )
-def set_goal(user_id: str, category: str, goal: str, target_days: int = 30, weekly_target: int = 0) -> str:
+def set_goal(category: str, goal: str, target_days: int = 30, weekly_target: int = 0, user_id: str = "jh") -> str:
     """Sets a new productivity goal for a user in GodSaeng Salon(갓생살롱). Supported categories: 운동, 다이어트, 공부, 취미, 미라클모닝.
 
     Args:
-        user_id:       User ID (e.g., minjun)
         category:      Goal category — 운동/다이어트/공부/취미/미라클모닝
         goal:          Specific goal description (e.g., 헬스 주 3회, 매일 독서 30분, 매일 6시 기상)
         target_days:   Number of days to maintain the goal (default 30)
         weekly_target: Target check-ins per week (0 = use category default: 운동 3, 다이어트 7, 공부 5, 취미 3, 미라클모닝 7)
+        user_id:       User ID (default: jh)
     """
     if category not in VALID_CATEGORIES:
         return f"카테고리는 {', '.join(VALID_CATEGORIES)} 중 하나여야 해요."
@@ -245,13 +245,13 @@ def set_goal(user_id: str, category: str, goal: str, target_days: int = 30, week
         openWorldHint=True,
     )
 )
-def check_in(image_url: str, user_id: str, category: str) -> str:
+def check_in(image_url: str, category: str, user_id: str = "jh") -> str:
     """Verifies goal achievement with a photo for GodSaeng Salon(갓생살롱). Analyzes the photo against the user's active goal and returns an encouraging score and feedback.
 
     Args:
         image_url: URL of the verification photo
-        user_id:   User ID
         category:  Goal category to check in for (운동/다이어트/공부/취미/미라클모닝)
+        user_id:   User ID (default: jh)
     """
     try:
         goal = _get_goal_by_category(user_id, category)
@@ -341,11 +341,11 @@ def check_in(image_url: str, user_id: str, category: str) -> str:
         openWorldHint=False,
     )
 )
-def get_progress(user_id: str) -> str:
+def get_progress(user_id: str = "jh") -> str:
     """Retrieves goal achievement progress and check-in statistics for a user from GodSaeng Salon(갓생살롱). Shows all active goals with completion rates and progress bars.
 
     Args:
-        user_id: User ID
+        user_id: User ID (default: jh)
     """
     goals = _get_user_goals(user_id)
 
@@ -383,11 +383,11 @@ def get_progress(user_id: str) -> str:
         openWorldHint=True,
     )
 )
-def generate_daily_plan(user_id: str) -> str:
+def generate_daily_plan(user_id: str = "jh") -> str:
     """Generates a personalized daily productivity plan using GodSaeng Salon(갓생살롱) based on the user's active goals. Includes time blocks and actionable tasks for today.
 
     Args:
-        user_id: User ID
+        user_id: User ID (default: jh)
     """
     goals = _get_user_goals(user_id)
 
@@ -424,11 +424,11 @@ def generate_daily_plan(user_id: str) -> str:
         openWorldHint=True,
     )
 )
-def get_weekly_report(user_id: str) -> str:
+def get_weekly_report(user_id: str = "jh") -> str:
     """Generates a weekly achievement report for a user in GodSaeng Salon(갓생살롱). Shows day-by-day check-in results for each goal, whether the weekly target was met, and encouraging or celebratory feedback.
 
     Args:
-        user_id: User ID
+        user_id: User ID (default: jh)
     """
     from datetime import timedelta, date as date_type
 
@@ -528,14 +528,14 @@ def get_weekly_report(user_id: str) -> str:
         openWorldHint=False,
     )
 )
-def set_daily_reminder(user_id: str, message: str, start_date: str, days: int = 30) -> str:
+def set_daily_reminder(message: str, start_date: str, days: int = 30, user_id: str = "jh") -> str:
     """Sets a recurring daily reminder for a user in GodSaeng Salon(갓생살롱). Creates individual reminders for each day from start_date over the given number of days. Ideal for daily habits like 미라클모닝(early rising) or workout routines.
 
     Args:
-        user_id:    User ID
         message:    Reminder message (e.g., 미라클모닝! 일어날 시간이야 🌅, 오늘 운동 했어? 💪)
         start_date: First reminder date in YYYY-MM-DD format
         days:       Number of days to repeat (default 30)
+        user_id:    User ID (default: jh)
     """
     try:
         start = datetime.strptime(start_date, "%Y-%m-%d").date()
@@ -573,13 +573,13 @@ def set_daily_reminder(user_id: str, message: str, start_date: str, days: int = 
         openWorldHint=False,
     )
 )
-def set_reminder(user_id: str, message: str, remind_date: str) -> str:
+def set_reminder(message: str, remind_date: str, user_id: str = "jh") -> str:
     """Saves a reminder for a user in GodSaeng Salon(갓생살롱) to be surfaced on the specified date.
 
     Args:
-        user_id:     User ID
         message:     Reminder content (e.g., 결혼식, 병원 예약, 헬스 등록)
         remind_date: Date to remind in YYYY-MM-DD format (e.g., 2026-06-28)
+        user_id:     User ID (default: jh)
     """
     try:
         datetime.strptime(remind_date, "%Y-%m-%d")
@@ -610,11 +610,11 @@ def set_reminder(user_id: str, message: str, remind_date: str) -> str:
         openWorldHint=False,
     )
 )
-def check_reminders(user_id: str) -> str:
+def check_reminders(user_id: str = "jh") -> str:
     """Checks today's reminders, upcoming schedule, and goal check-in status for a user in GodSaeng Salon(갓생살롱). Always call this at the start of each conversation to proactively surface alerts and streak info.
 
     Args:
-        user_id: User ID
+        user_id: User ID (default: jh)
     """
     today = datetime.now().strftime("%Y-%m-%d")
 
@@ -720,11 +720,11 @@ def check_reminders(user_id: str) -> str:
         openWorldHint=False,
     )
 )
-def load_demo_data(user_id: str) -> str:
+def load_demo_data(user_id: str = "jh") -> str:
     """Loads realistic demo data for a user in GodSaeng Salon(갓생살롱) for showcase and testing purposes. Resets all existing data for the user and inserts 3 goals with 14 days of check-in history and reminders.
 
     Args:
-        user_id: User ID to populate with demo data (e.g., jh)
+        user_id: User ID to populate with demo data (default: jh)
     """
     from datetime import timedelta
 
