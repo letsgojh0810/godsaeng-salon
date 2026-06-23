@@ -269,6 +269,9 @@ def check_in(image_url: str, category: str, user_id: str = "jh") -> str:
         client = get_client()
         response = client.models.generate_content(
             model=MODEL,
+            config=types.GenerateContentConfig(
+                thinking_config=types.ThinkingConfig(thinking_budget=0)
+            ),
             contents=[
                 types.Part(inline_data=types.Blob(mime_type=media_type, data=resp.content)),
                 types.Part(text=(
@@ -400,6 +403,9 @@ def generate_daily_plan(user_id: str = "jh") -> str:
     client = get_client()
     response = client.models.generate_content(
         model=MODEL,
+        config=types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_budget=0)
+        ),
         contents=types.Part(text=(
             f"다음 목표를 가진 사람의 오늘 갓생 플랜을 짜주세요.\n\n"
             f"날짜: {today}\n"
