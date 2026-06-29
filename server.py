@@ -2,7 +2,7 @@ import os
 import re
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import httpx
 from google import genai
@@ -192,7 +192,6 @@ def set_goal(category: str, goal: str, target_days: int = 30, weekly_target: int
     emoji = CATEGORY_EMOJI[category]
 
     # 자동 마일스톤 리마인더 생성
-    from datetime import timedelta
     today = datetime.now().date()
     auto_reminders = []
 
@@ -354,12 +353,13 @@ def get_progress(user_id: str = "jh") -> str:
 
     lines = [f"## {user_id}님의 갓생 진행 상황\n"]
     for g in goals:
-        verified_cnt = _count_checkins(g["id"])
         with get_db() as conn:
-            total_attempts = conn.execute(
-                "SELECT COUNT(DISTINCT date) AS cnt FROM checkins WHERE goal_id = ?",
+            row = conn.execute(
+                "SELECT SUM(verified) AS v, COUNT(DISTINCT date) AS t FROM checkins WHERE goal_id = ?",
                 (g["id"],),
-            ).fetchone()["cnt"]
+            ).fetchone()
+        verified_cnt = row["v"] or 0
+        total_attempts = row["t"] or 0
 
         rate = round(verified_cnt / g["target_days"] * 100)
         emoji = CATEGORY_EMOJI.get(g["category"], "✅")
@@ -430,8 +430,6 @@ def get_weekly_report(user_id: str = "jh") -> str:
     Args:
         user_id: User ID (default: jh)
     """
-    from datetime import timedelta, date as date_type
-
     today = datetime.now().date()
     week_start = today - timedelta(days=today.weekday())  # 이번 주 월요일
     week_dates = [(week_start + timedelta(days=i)) for i in range(7)]
@@ -452,7 +450,7 @@ def get_weekly_report(user_id: str = "jh") -> str:
 
     for g in goals:
         emoji = CATEGORY_EMOJI.get(g["category"], "✅")
-        weekly_target = g.get("weekly_target") or CATEGORY_WEEKLY_DEFAULT.get(g["category"], 5)
+        weekly_target = g["weekly_target"]
 
         # 이번 주 날짜별 verified 체크인 조회
         with get_db() as conn:
@@ -542,7 +540,6 @@ def set_daily_reminder(message: str, start_date: str, days: int = 30, user_id: s
     except ValueError:
         return "날짜 형식이 잘못됐어요. YYYY-MM-DD 형식으로 입력해주세요. (예: 2026-06-28)"
 
-    from datetime import timedelta
     reminders = [
         (user_id, message, (start + timedelta(days=i)).strftime("%Y-%m-%d"))
         for i in range(days)
@@ -658,7 +655,6 @@ def check_reminders(user_id: str = "jh") -> str:
         dates = [r[0] for r in dates]
 
         streak = 0
-        from datetime import timedelta, date as date_type
         check_date = datetime.strptime(today, "%Y-%m-%d").date()
         for d in dates:
             if d == check_date.strftime("%Y-%m-%d"):
@@ -726,8 +722,6 @@ def setup_my_profile(user_id: str = "jh") -> str:
     Args:
         user_id: User ID (default: jh)
     """
-    from datetime import timedelta
-
     today = datetime.now().date()
 
     # 기존 데이터 초기화
